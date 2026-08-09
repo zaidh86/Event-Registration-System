@@ -4,8 +4,8 @@ Backend REST API that lets organizers create and manage events and lets
 attendees discover and register for them. Built with Django, Django REST
 Framework, and PostgreSQL, authenticated with JWT.
 
-Current state: Phase 1 (project setup, authentication, user management).
-Event and registration endpoints arrive in later phases.
+Current state: Phase 2 (project setup, authentication, user management,
+event management, categories). Registration endpoints arrive in Phase 3.
 
 ## Requirements
 
@@ -92,6 +92,31 @@ validators (minimum length 8, common/numeric/similarity checks).
 | GET | `/api/v1/users/me/` | bearer | Current user's profile |
 | PATCH | `/api/v1/users/me/` | bearer | Update `first_name` / `last_name`; `email` and `role` are read-only |
 
+### Events
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/v1/events/` | none | Published events, paginated, soonest first |
+| POST | `/api/v1/events/` | organizer | Create an event as `DRAFT` (`title`, `description`, `category`, `location`, `starts_at`, `capacity` ≥ 1) |
+| GET | `/api/v1/events/mine/` | organizer | The caller's own events, every status |
+| GET | `/api/v1/events/{id}/` | none | Event detail; drafts are visible only to their organizer (404 otherwise) |
+| PATCH | `/api/v1/events/{id}/` | owner | Edit an event (see rules below) |
+| DELETE | `/api/v1/events/{id}/` | owner | Delete an event |
+| POST | `/api/v1/events/{id}/publish/` | owner | `DRAFT` → `PUBLISHED`; the start must be in the future |
+| POST | `/api/v1/events/{id}/cancel/` | owner | `PUBLISHED` → `CANCELLED` (terminal) |
+
+Editing rules: `DRAFT` events are freely editable; `PUBLISHED` events are
+editable until they start and their start must remain in the future;
+`CANCELLED` and past published events return `409` with code
+`event_not_editable`. Invalid lifecycle transitions return `409` with code
+`invalid_status_transition`.
+
+### Categories
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/v1/categories/` | none | Category list (seeded by migration, managed in admin) |
+
 ### Errors
 
 Every error uses one envelope with a stable machine-readable code:
@@ -101,7 +126,8 @@ Every error uses one envelope with a stable machine-readable code:
 ```
 
 Status mapping: 400 validation, 401 unauthenticated, 403 forbidden,
-404 missing or not visible, 405 method not allowed, 429 throttled.
+404 missing or not visible, 405 method not allowed, 409 business-rule or
+state conflict, 429 throttled.
 
 ## Running tests
 

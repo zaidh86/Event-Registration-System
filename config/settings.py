@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     "common",
     "users",
     "authentication",
+    "events",
 ]
 
 MIDDLEWARE = [

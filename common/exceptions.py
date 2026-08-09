@@ -7,10 +7,28 @@ Every API error is returned in a single envelope:
 
 import logging
 
-from rest_framework.exceptions import ErrorDetail, Throttled, ValidationError
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+from django.http import Http404
+from rest_framework import status
+from rest_framework.exceptions import (
+    APIException,
+    ErrorDetail,
+    NotFound,
+    PermissionDenied,
+    Throttled,
+    ValidationError,
+)
 from rest_framework.views import exception_handler as drf_exception_handler
 
 logger = logging.getLogger(__name__)
+
+
+class Conflict(APIException):
+    """The request is valid but conflicts with the current resource state."""
+
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "The request conflicts with the current state of the resource."
+    default_code = "conflict"
 
 CODE_OVERRIDES = {
     ValidationError: "validation_error",
@@ -26,6 +44,13 @@ def error_body(code, message, details=None):
 
 
 def api_exception_handler(exc, context):
+    # Mirror DRF's own conversion of Django exceptions so the envelope
+    # logic below always operates on a DRF exception.
+    if isinstance(exc, Http404):
+        exc = NotFound()
+    elif isinstance(exc, DjangoPermissionDenied):
+        exc = PermissionDenied()
+
     response = drf_exception_handler(exc, context)
     if response is None:
         return None
