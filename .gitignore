@@ -1,0 +1,16 @@
+# Environment
+.env
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Django
+staticfiles/
+
+# Claude context
+claude/
+
+# OS
+.DS_Store
