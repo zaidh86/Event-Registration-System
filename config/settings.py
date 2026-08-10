@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
+    "drf_spectacular",
     "common",
     "users",
     "authentication",
@@ -137,6 +138,26 @@ REST_FRAMEWORK = {
         "user": env("THROTTLE_USER", "1000/minute"),
         "auth": env("THROTTLE_AUTH", "10/minute"),
     },
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Event Registration System API",
+    "DESCRIPTION": (
+        "REST API for organizers to create and manage events and for "
+        "authenticated users to register for them.\n\n"
+        "All errors use one envelope: "
+        '`{"error": {"code": "<machine-readable>", "message": "<human-readable>", '
+        '"details": <extra or null>}}`. Status mapping: 400 validation, '
+        "401 unauthenticated, 403 forbidden, 404 missing or not visible, "
+        "409 business-rule/state conflict, 429 throttled."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "ENUM_NAME_OVERRIDES": {
+        "EventStatusEnum": "events.models.EventStatus",
+        "RegistrationStatusEnum": "registrations.models.RegistrationStatus",
+    },
 }
 
 SIMPLE_JWT = {
@@ -147,6 +168,15 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 31536000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=True)
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 LANGUAGE_CODE = "en-us"
 

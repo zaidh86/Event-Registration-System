@@ -1,10 +1,13 @@
 """Event domain operations."""
 
 from django.db import transaction
+from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from common.exceptions import Conflict
 from events.models import Event, EventStatus
+from registrations.models import RegistrationStatus
 from registrations.services import confirmed_registration_count
 
 
@@ -80,3 +83,53 @@ def ensure_capacity_not_below_confirmed(*, event, new_capacity):
             "Capacity cannot be reduced below the number of confirmed registrations.",
             code="capacity_below_confirmed",
         )
+
+
+def search_published_events(*, filters):
+    """Filter the public event list; all filters combine with AND."""
+    queryset = Event.objects.filter(status=EventStatus.PUBLISHED).select_related("category")
+    if title := filters.get("title"):
+        queryset = queryset.filter(title__icontains=title)
+    if (category := filters.get("category")) is not None:
+        queryset = queryset.filter(category_id=category)
+    if location := filters.get("location"):
+        queryset = queryset.filter(location__icontains=location)
+    if date_from := filters.get("date_from"):
+        queryset = queryset.filter(starts_at__gte=date_from)
+    if date_to := filters.get("date_to"):
+        queryset = queryset.filter(starts_at__lte=date_to)
+    if filters.get("upcoming"):
+        queryset = queryset.filter(starts_at__gt=timezone.now())
+    if ordering := filters.get("ordering"):
+        queryset = queryset.order_by(ordering, "id")
+    return queryset
+
+
+def organizer_dashboard(*, organizer):
+    events = list(
+        Event.objects.filter(organizer=organizer).annotate(
+            confirmed_registrations=Count(
+                "registrations",
+                filter=Q(registrations__status=RegistrationStatus.CONFIRMED),
+            ),
+            cancelled_registrations=Count(
+                "registrations",
+                filter=Q(registrations__status=RegistrationStatus.CANCELLED),
+            ),
+        )
+    )
+    for event in events:
+        event.available_seats = max(event.capacity - event.confirmed_registrations, 0)
+    status_counts = {
+        status: sum(1 for event in events if event.status == status)
+        for status in (EventStatus.DRAFT, EventStatus.PUBLISHED, EventStatus.CANCELLED)
+    }
+    totals = {
+        "events": len(events),
+        "draft_events": status_counts[EventStatus.DRAFT],
+        "published_events": status_counts[EventStatus.PUBLISHED],
+        "cancelled_events": status_counts[EventStatus.CANCELLED],
+        "confirmed_registrations": sum(event.confirmed_registrations for event in events),
+        "cancelled_registrations": sum(event.cancelled_registrations for event in events),
+    }
+    return {"totals": totals, "events": events}

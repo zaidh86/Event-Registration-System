@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
@@ -10,6 +11,7 @@ from registrations.serializers import RegistrationSerializer
 
 
 class EventRegisterView(APIView):
+    @extend_schema(request=None, responses={201: RegistrationSerializer})
     def post(self, request, pk):
         registration = services.register_for_event(user=request.user, event_id=pk)
         return Response(
@@ -18,6 +20,7 @@ class EventRegisterView(APIView):
 
 
 class RegistrationCancelView(APIView):
+    @extend_schema(request=None, responses=RegistrationSerializer)
     def post(self, request, pk):
         registration = services.cancel_registration(user=request.user, registration_id=pk)
         return Response(RegistrationSerializer(registration).data)

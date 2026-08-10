@@ -4,9 +4,34 @@ Backend REST API that lets organizers create and manage events and lets
 attendees discover and register for them. Built with Django, Django REST
 Framework, and PostgreSQL, authenticated with JWT.
 
-Current state: Phase 3 (project setup, authentication, user management,
-event management, categories, event registration). Search and filtering
-arrive in Phase 4.
+All four implementation phases are complete: authentication and user
+management, event management with categories, event registration with
+capacity enforcement, and search/filtering with an organizer dashboard
+and interactive API documentation.
+
+## Architecture
+
+```text
+Client → REST API (DRF views) → Service layer (per-app services.py) → PostgreSQL
+```
+
+- `config/` — environment-driven settings and versioned URL routing.
+- `common/` — shared API infrastructure: the error envelope exception
+  handler, pagination, JSON error handlers, and the test base class.
+- `users/` — custom email-login user model with an immutable
+  `ORGANIZER`/`ATTENDEE` role.
+- `authentication/` — registration, JWT login/refresh/logout, password
+  change.
+- `events/` — categories, event CRUD, lifecycle (publish/cancel),
+  search/filtering, and the organizer dashboard.
+- `registrations/` — registration workflow with atomic capacity
+  enforcement.
+
+Views stay thin: validation lives in serializers, business rules and
+query construction live in each app's `services.py`, and every error is
+shaped by one exception handler. Concurrency-sensitive operations
+(registration, event deletion, capacity reduction) serialize on a
+`select_for_update()` lock of the event row inside `transaction.atomic()`.
 
 ## Requirements
 
@@ -66,11 +91,29 @@ file in the project root (see `.env.example`).
 | `THROTTLE_USER` | no | `1000/minute` | Authenticated request rate limit |
 | `THROTTLE_AUTH` | no | `10/minute` | Rate limit for authentication endpoints |
 | `LOG_LEVEL` | no | `INFO` | Root log level |
+| `SECURE_SSL_REDIRECT` | no | `True` | Redirect HTTP to HTTPS (production only) |
+| `SECURE_HSTS_SECONDS` | no | `31536000` | HSTS max-age (production only) |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | no | `True` | HSTS subdomain flag (production only) |
+| `SECURE_HSTS_PRELOAD` | no | `True` | HSTS preload flag (production only) |
 
 ## API
 
 All endpoints are versioned under `/api/v1/`. Authenticated requests send
 `Authorization: Bearer <access token>`.
+
+Interactive documentation is generated from the code with
+drf-spectacular:
+
+| Path | Description |
+| --- | --- |
+| `/api/v1/schema/` | OpenAPI 3 schema (YAML) |
+| `/api/v1/docs/` | Swagger UI |
+
+Authentication flow: register, then `POST /auth/login/` for an
+access/refresh pair; send the short-lived access token as a bearer
+header; rotate with `POST /auth/refresh/` (the used refresh token is
+blacklisted); `POST /auth/logout/` blacklists the presented refresh
+token.
 
 ### Authentication
 
@@ -97,7 +140,7 @@ validators (minimum length 8, common/numeric/similarity checks).
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| GET | `/api/v1/events/` | none | Published events, paginated, soonest first |
+| GET | `/api/v1/events/` | none | Published events, paginated, soonest first; supports search filters (below) |
 | POST | `/api/v1/events/` | organizer | Create an event as `DRAFT` (`title`, `description`, `category`, `location`, `starts_at`, `capacity` ≥ 1) |
 | GET | `/api/v1/events/mine/` | organizer | The caller's own events, every status |
 | GET | `/api/v1/events/{id}/` | none | Event detail; drafts are visible only to their organizer (404 otherwise) |
@@ -111,6 +154,30 @@ editable until they start and their start must remain in the future;
 `CANCELLED` and past published events return `409` with code
 `event_not_editable`. Invalid lifecycle transitions return `409` with code
 `invalid_status_transition`.
+
+Search filters on `GET /api/v1/events/` (all combine with AND; invalid
+values return the standard 400 envelope):
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `title` | text | Case-insensitive substring match on the title |
+| `category` | integer | Category id |
+| `location` | text | Case-insensitive substring match on the location |
+| `date_from` | ISO-8601 datetime | Events starting at or after this moment |
+| `date_to` | ISO-8601 datetime | Events starting at or before this moment |
+| `upcoming` | boolean | `true` keeps only events that have not started |
+| `ordering` | choice | `starts_at`, `-starts_at`, `title`, `-title`, `created_at`, `-created_at` |
+| `page`, `page_size` | integer | Pagination (default 20 per page, maximum 100) |
+
+### Organizer dashboard
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/v1/organizer/dashboard/` | organizer | Totals and per-event registration aggregates for the caller's own events |
+
+The response contains `totals` (event counts by status, confirmed and
+cancelled registration totals) and `events` (one row per event with
+confirmed/cancelled registration counts and available seats).
 
 ### Categories
 
@@ -162,3 +229,18 @@ SECRET_KEY=dev-check DEBUG=True .venv/bin/python manage.py test
 The test runner creates and destroys its own database
 (`test_event_registration`), so the configured PostgreSQL role needs the
 `CREATEDB` privilege.
+
+## Deployment
+
+- Set `DEBUG=False`, a strong unique `SECRET_KEY`, `ALLOWED_HOSTS`, and
+  an explicit `CORS_ALLOWED_ORIGINS` allowlist.
+- With `DEBUG=False`, HTTPS hardening activates automatically: SSL
+  redirect, secure session/CSRF cookies, and HSTS (all overridable via
+  the environment variables above). The app trusts an
+  `X-Forwarded-Proto: https` header from the fronting proxy.
+- Serve with a WSGI/ASGI server (e.g. `gunicorn config.wsgi`) behind a
+  TLS-terminating proxy, run `manage.py migrate` on release, and collect
+  static files for the admin with `manage.py collectstatic`.
+- Verify the configuration with
+  `manage.py check --deploy` — it passes cleanly with the settings in
+  this repository.

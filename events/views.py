@@ -1,4 +1,5 @@
 from django.db import transaction
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.generics import ListAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import SAFE_METHODS, AllowAny, IsAuthenticated
 from rest_framework.exceptions import NotFound
@@ -8,7 +9,12 @@ from rest_framework.views import APIView
 from events import services
 from events.models import Category, Event, EventStatus
 from events.permissions import IsOrganizer
-from events.serializers import CategorySerializer, EventSerializer
+from events.serializers import (
+    CategorySerializer,
+    EventFilterSerializer,
+    EventSerializer,
+    OrganizerDashboardSerializer,
+)
 
 
 class CategoryListView(ListAPIView):
@@ -17,6 +23,7 @@ class CategoryListView(ListAPIView):
     queryset = Category.objects.all()
 
 
+@extend_schema_view(get=extend_schema(parameters=[EventFilterSerializer]))
 class EventListCreateView(ListCreateAPIView):
     serializer_class = EventSerializer
 
@@ -26,7 +33,9 @@ class EventListCreateView(ListCreateAPIView):
         return [AllowAny()]
 
     def get_queryset(self):
-        return Event.objects.filter(status=EventStatus.PUBLISHED).select_related("category")
+        filter_serializer = EventFilterSerializer(data=self.request.query_params)
+        filter_serializer.is_valid(raise_exception=True)
+        return services.search_published_events(filters=filter_serializer.validated_data)
 
     def perform_create(self, serializer):
         serializer.save(organizer=self.request.user)
@@ -81,6 +90,7 @@ class EventDetailView(RetrieveUpdateDestroyAPIView):
 
 
 class EventPublishView(APIView):
+    @extend_schema(request=None, responses=EventSerializer)
     def post(self, request, pk):
         event = services.get_owned_event(user=request.user, pk=pk)
         services.publish_event(event=event)
@@ -88,7 +98,17 @@ class EventPublishView(APIView):
 
 
 class EventCancelView(APIView):
+    @extend_schema(request=None, responses=EventSerializer)
     def post(self, request, pk):
         event = services.get_owned_event(user=request.user, pk=pk)
         services.cancel_event(event=event)
         return Response(EventSerializer(event).data)
+
+
+class OrganizerDashboardView(APIView):
+    permission_classes = [IsOrganizer]
+
+    @extend_schema(responses=OrganizerDashboardSerializer)
+    def get(self, request):
+        dashboard = services.organizer_dashboard(organizer=request.user)
+        return Response(OrganizerDashboardSerializer(dashboard).data)
