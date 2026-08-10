@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework.generics import ListAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import SAFE_METHODS, AllowAny, IsAuthenticated
 from rest_framework.exceptions import NotFound
@@ -64,6 +65,19 @@ class EventDetailView(RetrieveUpdateDestroyAPIView):
         if self.request.method == "PATCH":
             services.ensure_event_editable(event=event)
         return event
+
+    def perform_update(self, serializer):
+        # Lock the event row so the capacity floor cannot be bypassed by a
+        # registration committing between the check and the save.
+        with transaction.atomic():
+            event = Event.objects.select_for_update().get(pk=serializer.instance.pk)
+            services.ensure_capacity_not_below_confirmed(
+                event=event, new_capacity=serializer.validated_data.get("capacity")
+            )
+            serializer.save()
+
+    def perform_destroy(self, instance):
+        services.delete_event(event=instance)
 
 
 class EventPublishView(APIView):

@@ -4,8 +4,9 @@ Backend REST API that lets organizers create and manage events and lets
 attendees discover and register for them. Built with Django, Django REST
 Framework, and PostgreSQL, authenticated with JWT.
 
-Current state: Phase 2 (project setup, authentication, user management,
-event management, categories). Registration endpoints arrive in Phase 3.
+Current state: Phase 3 (project setup, authentication, user management,
+event management, categories, event registration). Search and filtering
+arrive in Phase 4.
 
 ## Requirements
 
@@ -116,6 +117,29 @@ editable until they start and their start must remain in the future;
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | GET | `/api/v1/categories/` | none | Category list (seeded by migration, managed in admin) |
+
+### Registrations
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| POST | `/api/v1/events/{id}/register/` | bearer | Register for a published event (immediately `CONFIRMED`) |
+| GET | `/api/v1/events/{id}/registrations/` | owner | Registrations of the caller's own event, every status |
+| GET | `/api/v1/registrations/` | bearer | The caller's own registration history, every status |
+| POST | `/api/v1/registrations/{id}/cancel/` | see below | Cancel a registration, preserving the record |
+
+Registration rules: any authenticated user may register, except an
+organizer for their own event (`403`). Registration is rejected with `409`
+when the event is not published (`event_not_open`), has started
+(`event_started`), is at capacity counting confirmed registrations only
+(`event_full`), or the caller already holds a confirmed registration
+(`already_registered`). Capacity is enforced atomically under concurrent
+requests. Cancelling (allowed for the registration's owner and the event's
+organizer, until the event starts) frees the seat and keeps the record;
+registering again afterwards creates a new record. Registration responses
+embed the event's current status. An event with registrations of any
+status cannot be deleted (`409 event_has_registrations`) — cancel it
+instead — and a published event's capacity cannot drop below its confirmed
+registrations (`409 capacity_below_confirmed`).
 
 ### Errors
 

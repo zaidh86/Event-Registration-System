@@ -5,7 +5,9 @@ from django.utils import timezone
 
 from common.testing import APITestCase
 from events.models import EventStatus
-from events.tests.helpers import create_event, create_organizer
+from events.tests.helpers import create_attendee, create_event, create_organizer
+from registrations.models import RegistrationStatus
+from registrations.tests.helpers import create_registration
 
 
 class EventUpdateTests(APITestCase):
@@ -100,6 +102,45 @@ class EventUpdateTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         event.refresh_from_db()
         self.assertFalse(event.has_started)
+
+    def test_capacity_cannot_drop_below_confirmed_registrations(self):
+        event = create_event(self.organizer, status=EventStatus.PUBLISHED, capacity=5)
+        create_registration(create_attendee("a@example.com"), event)
+        create_registration(create_attendee("b@example.com"), event)
+        self.client.force_authenticate(self.organizer)
+
+        response = self.client.patch(self.url(event), {"capacity": 1})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertErrorEnvelope(response, code="capacity_below_confirmed")
+        event.refresh_from_db()
+        self.assertEqual(event.capacity, 5)
+
+    def test_capacity_can_be_reduced_to_confirmed_count(self):
+        event = create_event(self.organizer, status=EventStatus.PUBLISHED, capacity=5)
+        create_registration(create_attendee("a@example.com"), event)
+        create_registration(create_attendee("b@example.com"), event)
+        self.client.force_authenticate(self.organizer)
+
+        response = self.client.patch(self.url(event), {"capacity": 2})
+
+        self.assertEqual(response.status_code, 200)
+        event.refresh_from_db()
+        self.assertEqual(event.capacity, 2)
+
+    def test_cancelled_registrations_do_not_count_toward_capacity_floor(self):
+        event = create_event(self.organizer, status=EventStatus.PUBLISHED, capacity=5)
+        create_registration(create_attendee("a@example.com"), event)
+        create_registration(
+            create_attendee("b@example.com"), event, status=RegistrationStatus.CANCELLED
+        )
+        self.client.force_authenticate(self.organizer)
+
+        response = self.client.patch(self.url(event), {"capacity": 1})
+
+        self.assertEqual(response.status_code, 200)
+        event.refresh_from_db()
+        self.assertEqual(event.capacity, 1)
 
     def test_put_is_not_allowed(self):
         event = create_event(self.organizer)

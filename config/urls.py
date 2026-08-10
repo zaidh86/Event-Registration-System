@@ -9,6 +9,7 @@ urlpatterns = [
     path("api/v1/users/", include("users.urls")),
     path("api/v1/events/", include("events.urls")),
     path("api/v1/categories/", CategoryListView.as_view(), name="categories-list"),
+    path("api/v1/", include("registrations.urls")),
 ]
 
 handler400 = "common.views.bad_request"

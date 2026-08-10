@@ -2,7 +2,9 @@ from django.urls import reverse
 
 from common.testing import APITestCase
 from events.models import Event, EventStatus
-from events.tests.helpers import create_event, create_organizer
+from events.tests.helpers import create_attendee, create_event, create_organizer
+from registrations.models import RegistrationStatus
+from registrations.tests.helpers import create_registration
 
 
 class EventDeleteTests(APITestCase):
@@ -47,3 +49,26 @@ class EventDeleteTests(APITestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertErrorEnvelope(response, code="not_found")
+
+    def test_event_with_registrations_cannot_be_deleted(self):
+        event = create_event(self.organizer, status=EventStatus.PUBLISHED)
+        create_registration(create_attendee(), event)
+        self.client.force_authenticate(self.organizer)
+
+        response = self.client.delete(self.url(event))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertErrorEnvelope(response, code="event_has_registrations")
+        self.assertTrue(Event.objects.filter(id=event.id).exists())
+
+    def test_event_with_only_cancelled_registrations_cannot_be_deleted(self):
+        event = create_event(self.organizer, status=EventStatus.PUBLISHED)
+        create_registration(
+            create_attendee(), event, status=RegistrationStatus.CANCELLED
+        )
+        self.client.force_authenticate(self.organizer)
+
+        response = self.client.delete(self.url(event))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertErrorEnvelope(response, code="event_has_registrations")
